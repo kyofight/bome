@@ -1,39 +1,40 @@
-import puppeteer from 'puppeteer-extra'
-import StealthPlugin from 'puppeteer-extra-plugin-stealth'
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import fs from 'fs';
+
 const puppeteerStealth = StealthPlugin();
 puppeteerStealth.enabledEvasions.delete('user-agent-override');
 puppeteer.use(puppeteerStealth);
 
 
 let alerts = null;
-let timeout = 0;
+let browser_ = null;
 
 // puppeteer usage as normal
 puppeteer.launch({ headless: false, targetFilter: target => target.type() !== 'other' }).then(async browser => {
-  const page = await browser.newPage()
-  await page.goto('https://birdeye.so/new-listings?chain=solana')
+  browser_ = browser;
+  const page = await browser.newPage();
+  await page.goto('https://birdeye.so/new-listings?chain=solana');
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
 
-  await delay(15000)
+  await delay(15000);
 
   await checkAlert(page);
 
-  await page.screenshot({ path: 'screenshot.png', fullPage: true })
-  await browser.close()
+  await page.screenshot({ path: 'screenshot.png', fullPage: true });
+  await browser.close();
 });
 
 
 async function delay(timeout) {
   return new Promise(function(resolve, reject) {
     setTimeout(function() {
-      resolve()
+      resolve();
     }, timeout);
-  })
+  });
 }
 
 async function checkAlert(page) {
-
   if (!alerts) {
     await new Promise((resolve, reject) => {
       fs.readFile('alerts.json', (err, data) => {
@@ -50,7 +51,15 @@ async function checkAlert(page) {
     });
   }
 
-  const three = await page.evaluate(async () => {
+  const result = await page.evaluate(async ({ alerts, requestToken, tgToken, tgChatId }) => {
+    async function delay(timeout) {
+      return new Promise(function(resolve, reject) {
+        setTimeout(function() {
+          resolve();
+        }, timeout);
+      });
+    }
+
     return await fetch('https://multichain-api.birdeye.so/multichain/gems/new_listing', {
       method: 'post',
       body: JSON.stringify({
@@ -80,7 +89,7 @@ async function checkAlert(page) {
         'Content-Type': 'application/json',
         'Agent-Id': window.localStorage.getItem('agent-id'),
         'Cf-Be': window.localStorage.getItem('sec-be'),
-        'Token': '',
+        'Token': requestToken,
       },
     }).then((response) => {
       return response.json();
@@ -105,18 +114,55 @@ async function checkAlert(page) {
         if (!alerts[address]) {
           alerts[address] = data;
 
-          // await delay(2000)
-          // await sendMessage(data);
+          await delay(2000);
+          await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+            method: 'post',
+            body: JSON.stringify({
+              parse_mode: 'html',
+              'chat_id': tgChatId,
+              'text': `name: <b>${name}</b>
+address: <b>${data.address}</b>
+symbol: <b>${data.symbol}</b>
+holder: <b>${data.holder}</b>
+mc: <b>${data.mc}</b>
+v24hUSD: <b>${data.v24hUSD}</b>
+createdAt: <b>${data.createdAt}</b>
+link: <a href='${data.link}'>${data.link}</a>`,
+              'disable_notification': false,
+            }),
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+          })
+            .then((response) => {
+              return response.json();
+            })
+            .catch((error) => {
+              console.log(error);
+            });
         }
       }
-
-      fs.writeFileSync('./alerts.json', JSON.stringify(alerts), 'utf8');
-
-      // await delay(15000)
-      // checkAlert(page);
+      return alerts;
     }).catch((error) => {
       console.log('error: ' + error.toString());
     });
+  }, {
+    alerts,
+    requestToken: process.env.REQUEST_TOKEN,
+    tgToken: process.env.TG_TOKEN,
+    tgChatId: process.env.TG_CHAT_ID,
   });
+
+  alerts = result ?? alerts;
+  fs.writeFileSync('./alerts.json', JSON.stringify(alerts), 'utf8');
+
+  await delay(15000);
+  return await checkAlert(page);
 };
 
+process.on('exit', () => {
+  if (browser_) {
+    browser_.close();
+  }
+});
