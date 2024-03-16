@@ -25,6 +25,7 @@
     "start": "pm2 start build/src/main.js",
     "dev": "node build/src/main.js",
     "stop": "pm2 delete all",
+    "logs": "pm2 logs",
     "clean": "rimraf coverage build tmp",
     "prebuild": "npm run lint",
     "build": "tsc -p tsconfig.json",
